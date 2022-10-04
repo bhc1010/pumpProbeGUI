@@ -6,8 +6,8 @@ import matplotlib.pyplot as plt
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 from extend_qt import QDataTable, QDataTableRow, QPlotter
-from pump_probe import PumpProbeProcedure, PumpProbeProcedureType, PumpProbe, PumpProbeConfig, PumpProbeExperiment, Pulse, Channel
-from devices import RHK_R9
+from ppspectroscopy.pump_probe import PumpProbeProcedure, PumpProbeProcedureType, PumpProbe, PumpProbeConfig, PumpProbeExperiment, Pulse, Channel
+from ppspectroscopy.devices import RHK_R9
 from scientific_spinbox import ScienDSpinBox
 from datetime import datetime
 
