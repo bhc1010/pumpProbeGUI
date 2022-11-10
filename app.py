@@ -47,21 +47,22 @@ class PumpProbeWorker(QtCore.QThread):
     def save_data(self, exp, data):
         dt, volt_data = data
         # Save measurement data
-        out = pd.DataFrame({'Voltage': volt_data, 'Time Delay': dt})
-        path = os.path.join(self.pump_probe.config.save_path, exp.name)
+        meta = exp.generate_csv_head()
+        head = [['Voltage', 'Time Delay']]
+        body = np.concatenate((volt_data, dt), axis=1)
+        out_data = np.concatenate((head, body), axis=0)
+        out = np.concatenate((meta, out_data), axis=0)
+        out = pd.DataFrame(out)
+
+        path = self.pump_probe.config.save_path
+        out.to_csv(os.path.join(path, f'{exp.name}.csv'), index=False, header=False)
+
+        # Save figure as png preview
+        path = os.path.join(path, 'pngpreview')
         if not os.path.isdir(path):
             os.mkdir(path)
-        out.to_csv(os.path.join(path, f'{exp.name}.csv'), index=False)
-
-        # Save measurement figure
         meta = exp.generate_meta()
-        plt.savefig(f"{os.path.join(path, exp.name)}.png", metadata=meta)
-        
-        # Save RHK position info
-        with open(os.path.join(path,  "meta.toml"), 'w') as file:
-            toml = exp.generate_toml()
-            toml += f"Lock-in Freq: {self.pump_probe.config.lockin_freq}"
-            file.write(toml)
+        plt.savefig(f'{os.path.join(path, exp.name)}.png', metadata=meta)
 
     def run(self):
         """
@@ -816,22 +817,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self.time_delay_procedure_settings_layout_outer.hide()
         self.amp_procedure_settings_layout_outer.hide()
         self.image_procedure_settings_layout_outer.hide()
-        match self.procedure.currentText():
-            case "Time delay":
-                self.time_delay_procedure_settings_layout_outer.setHidden(False)
-                self.sweep_channel.setEnabled(True)
-            case "Amplitude":
-                self.amp_procedure_settings_layout_outer.setHidden(False)
-                if self.amp_procedure_channel.currentText() == "Probe":
-                    self.sweep_channel.setCurrentText("Pump")
-                else:
-                    self.sweep_channel.setCurrentText("Probe")
-                self.sweep_channel.setEnabled(False)
-            case "Image":
-                self.image_procedure_settings_layout_outer.setHidden(False)
-                self.sweep_channel.setEnabled(True)
-            case _:
-                pass
+
+        match = self.procedure.currentText()
+        if match == 'Time delay':
+            self.time_delay_procedure_settings_layout_outer.setHidden(False)
+            self.sweep_channel.setEnabled(True)
+        elif match == 'Amplitude':
+            self.amp_procedure_settings_layout_outer.setHidden(False)
+            if self.amp_procedure_channel.currentText() == "Probe":
+                self.sweep_channel.setCurrentText("Pump")
+            else:
+                self.sweep_channel.setCurrentText("Probe")
+            self.sweep_channel.setEnabled(False)
+        elif match == 'Image':
+            self.image_procedure_settings_layout_outer.setHidden(False)
+            self.sweep_channel.setEnabled(True)
     
     def sweep_param_changed(self):
         """
@@ -842,13 +842,15 @@ class MainWindow(QtWidgets.QMainWindow):
             self.set_sweep_suffix('s')                
      
     def set_sweep_suffix(self, suffix: str):
+        """
+        """
         self.sweep_start.setSuffix(suffix)
         self.sweep_end.setSuffix(suffix)
         self.sweep_step.setSuffix(suffix)
     
-    """
-    """
     def amp_proc_ch_changed(self):
+        """
+        """
         if self.amp_procedure_channel.currentText() == "Probe":
             self.sweep_channel.setCurrentText("Pump")
         else:
@@ -899,7 +901,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._hook.disconnect()
         self.procedure_btn.setEnabled(False)
 
-    def get_experiment_dict(self) -> dict[str, str]:
+    def get_experiment_dict(self) -> dict:
         """
         Returns a dict containing all relevant experimental information to be displayed in the queue. Dictionary keys correspond to column titles.
         """
@@ -908,21 +910,19 @@ class MainWindow(QtWidgets.QMainWindow):
                 'probe_amp': self.probe_amp.text(), 'probe_width': self.probe_width.text(), 'probe_edge': self.probe_edge.text(),
                 'domain': '', 'fixed_time_delay' : 'None'}
         
-        match exp_dict['procedure']:
-            case "Time delay":
-                bound = self.time_delay_time_spread.textFromValue(self.time_delay_time_spread.value()/2)
-                exp_dict['domain'] = f'(-{bound}s, {bound}s)'
-            case "Amplitude":
-                exp_dict['domain'] = f'({self.amp_procedure_start.text()}, {self.amp_procedure_end.text()})'
-                exp_dict['fixed_time_delay'] = self.amp_procedure_fixed_time_delay.text()
-                if self.amp_procedure_channel.currentText() == "Pump":
-                    exp_dict['pump_amp'] = exp_dict['domain']
-                else:
-                    exp_dict['probe_amp'] = exp_dict['domain']
-            case "Image":
-                pass
-            case _:
-                pass                  
+        match = exp_dict['procedure']
+        if match == 'Time delay':
+            bound = self.time_delay_time_spread.textFromValue(self.time_delay_time_spread.value()/2)
+            exp_dict['domain'] = f'(-{bound}s, {bound}s)'
+        elif match == 'Amplitde':
+            exp_dict['domain'] = f'({self.amp_procedure_start.text()}, {self.amp_procedure_end.text()})'
+            exp_dict['fixed_time_delay'] = self.amp_procedure_fixed_time_delay.text()
+            if self.amp_procedure_channel.currentText() == "Pump":
+                exp_dict['pump_amp'] = exp_dict['domain']
+            else:
+                exp_dict['probe_amp'] = exp_dict['domain']
+        elif match == 'Image':
+            pass           
         
         sweep_param = self.sweep_parameter.currentText()
         sweep_ch = self.sweep_channel.currentText()
@@ -1004,26 +1004,23 @@ class MainWindow(QtWidgets.QMainWindow):
                         pump_pulse.edge = sweep_range[i]
                         probe_pulse.edge = sweep_range[i]                        
 
-            match self.procedure.currentText():
-                case "Time delay":
-                    samples = self.time_delay_sample_size.value()
-                    domain = (-180, 180)
-                case "Amplitude":
-                    samples = self.amp_procedure_sample_size.value()
-                    domain = (self.amp_procedure_start.value(), self.amp_procedure_end.value())
-                    if self.amp_procedure_channel.currentText() == "Probe":
-                        probe_pulse.amp = domain[0]
-                    else:
-                        pump_pulse.amp = domain[0]
-                case "Image":
-                    samples = self.image_frames.value()
-                    domain = (-180, 180)
-                    self.report_progress("Image functionality not implemented yet.")
-                    return
-                case _:
-                    pass
+            match = self.procedure.currentText()
+            if match == 'Time delay':
+                samples = self.time_delay_sample_size.value()
+                domain = (-180, 180)
+            elif match == 'Amplitude':
+                samples = self.amp_procedure_sample_size.value()
+                domain = (self.amp_procedure_start.value(), self.amp_procedure_end.value())
+                if self.amp_procedure_channel.currentText() == "Probe":
+                    probe_pulse.amp = domain[0]
+                else:
+                    pump_pulse.amp = domain[0]
+            elif match == 'Image':
+                samples = self.image_frames.value()
+                domain = (-180, 180)
+                self.report_progress("Image functionality not implemented yet.")
+                return
                 
-
             new_experiment = PumpProbeExperiment(pump=pump_pulse, probe=probe_pulse, domain=domain, samples=samples)
             procedure.experiments.append(new_experiment)
         print("Added to queue:")
@@ -1052,27 +1049,27 @@ class MainWindow(QtWidgets.QMainWindow):
     """
     """
     def get_selected_procedure(self) -> PumpProbeProcedure:
-        match self.procedure.currentText():
-            case "Time delay":
-                proc_type = PumpProbeProcedureType.TIME_DELAY
-                proc_call = self.PumpProbe.awg.set_phase
-                proc_channel = Channel.PUMP
-                conversion_factor = self.time_delay_time_spread.value() / 360 * self.PumpProbe.config.sample_rate
-            case "Amplitude":
-                proc_type = PumpProbeProcedureType.AMPLITUDE                
-                proc_call = self.PumpProbe.awg.set_amp
-                if self.amp_procedure_channel.currentText() == "Probe":
-                    proc_channel = Channel.PROBE
-                else:
-                    proc_channel = Channel.PUMP
-                conversion_factor = 1.0
-            case "Image":
-                proc_type = PumpProbeProcedureType.IMAGE
-                proc_call = self.PumpProbe.stm.image
+        match = self.procedure.currentText()
+        if match == 'Time delay':
+            proc_type = PumpProbeProcedureType.TIME_DELAY
+            proc_call = self.PumpProbe.awg.set_phase
+            proc_channel = Channel.PUMP
+            conversion_factor = self.time_delay_time_spread.value() / 360 * self.PumpProbe.config.sample_rate
+        elif match == 'Amplitude':
+            proc_type = PumpProbeProcedureType.AMPLITUDE                
+            proc_call = self.PumpProbe.awg.set_amp
+            if self.amp_procedure_channel.currentText() == "Probe":
                 proc_channel = Channel.PROBE
-                conversion_factor = self.image_time_spread.value() / 360 * self.PumpProbe.config.sample_rate      
-            case _:
-                return None
+            else:
+                proc_channel = Channel.PUMP
+            conversion_factor = 1.0
+        elif match == 'Image':
+            proc_type = PumpProbeProcedureType.IMAGE
+            proc_call = self.PumpProbe.stm.image
+            proc_channel = Channel.PROBE
+            conversion_factor = self.image_time_spread.value() / 360 * self.PumpProbe.config.sample_rate
+        else:
+            return None
             
         return PumpProbeProcedure(proc_type=proc_type, call=proc_call, channel=proc_channel, experiments=list(), conversion_factor=conversion_factor)
     

@@ -126,8 +126,8 @@ class QPlotter(QtCore.QObject):
         fig.canvas.manager.toolmanager.add_tool('Flip Data', FlipData)
         fig.canvas.manager.toolbar.add_tool('Flip Data', 'custom')
         
-        fig.canvas.manager.toolmanager.add_tool('Plot FFT PSD', PlotFFT)
-        fig.canvas.manager.toolbar.add_tool('Plot FFT PSD', 'custom')
+        # fig.canvas.manager.toolmanager.add_tool('Plot FFT PSD', PlotFFT)
+        # fig.canvas.manager.toolbar.add_tool('Plot FFT PSD', 'custom')
 
         procedure_info, line_name, x_axis = info
         ax = fig.add_subplot(111)
