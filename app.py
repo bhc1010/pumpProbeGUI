@@ -140,7 +140,7 @@ class PumpProbeWorker(QtCore.QThread):
                     
                 
                 # Get tip position
-                # exp.stm_coords = self.pump_probe.stm.get_position()
+                exp.stm_coords = self.pump_probe.stm.get_position()
                 try:
                     self._progress.emit("Running pump-probe experiment.")
                     dt, volt_data = self.pump_probe.run(procedure=procedure, experiment_idx=exp_idx, new_arb=self._new_arb, plotter=self.plotter)
