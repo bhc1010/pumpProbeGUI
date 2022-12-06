@@ -3,6 +3,7 @@ import os, traceback
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import logging
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 from extend_qt import QDataTable, QDataTableRow, QPlotter
@@ -10,6 +11,8 @@ from ppspectroscopy.pump_probe import PumpProbeProcedure, PumpProbeProcedureType
 from ppspectroscopy.devices import RHK_R9
 from scientific_spinbox import ScienDSpinBox
 from datetime import datetime
+
+logging.lev
 
 plt.ion()
 
@@ -133,7 +136,7 @@ class PumpProbeWorker(QtCore.QThread):
 
                 # Make new figure 
                 if exp_idx == 0 or not procedure.single_plot:
-                    self._make_figure.emit([exp.generate_toml(), line_name, procedure.generate_domain_title()])
+                    self._make_figure.emit([exp.generate_csv_head(), line_name, procedure.generate_domain_title()])
                 else:
                     self._add_line.emit(line_name)
 
