@@ -3,7 +3,6 @@ import os, traceback
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import logging
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 from extend_qt import QDataTable, QDataTableRow, QPlotter
@@ -11,8 +10,6 @@ from ppspectroscopy.pump_probe import PumpProbeProcedure, PumpProbeProcedureType
 from ppspectroscopy.devices import RHK_R9
 from scientific_spinbox import ScienDSpinBox
 from datetime import datetime
-
-logging.StreamHandler().setLevel(logging.INFO)
 
 plt.ion()
 
