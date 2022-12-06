@@ -139,7 +139,8 @@ class QPlotter(QtCore.QObject):
         line = ax.plot(self.xdata, self.ydata, label=line_name)[0]
         self.lines.append(line)
         plt.text(1.05, 0.25, procedure_info, transform=ax.transAxes)
-        plt.legend()
+        if line_name:
+            plt.legend()
         
     def add_line(self, line_name: str):
         self.clr()
