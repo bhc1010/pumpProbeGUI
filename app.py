@@ -12,7 +12,7 @@ from ppspectroscopy.devices import RHK_R9
 from scientific_spinbox import ScienDSpinBox
 from datetime import datetime
 
-logging.lev
+logging.StreamHandler().setLevel(logging.INFO)
 
 plt.ion()
 
