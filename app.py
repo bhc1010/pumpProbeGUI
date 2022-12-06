@@ -1,9 +1,8 @@
-import os, traceback
+import os, sys, logging, time
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import logging
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 from extend_qt import QDataTable, QDataTableRow, QPlotter
@@ -12,12 +11,22 @@ from ppspectroscopy.devices import RHK_R9
 from scientific_spinbox import ScienDSpinBox
 from datetime import datetime
 
-logging.StreamHandler().setLevel(logging.INFO)
-
 plt.ion()
 
+log = logging.getLogger(__name__)
+log.setLevel(logging.DEBUG)
+formatter = logging.Formatter(fmt="%(asctime)s %(levelname)s: %(message)s")
+ch = logging.StreamHandler(sys.stdout)
+ch.setLevel(logging.DEBUG)
+ch.setFormatter(formatter)
+fh = logging.FileHandler("debug.log", "w")
+fh.setLevel(logging.DEBUG)
+fh.setFormatter(formatter)
+log.addHandler(ch)
+log.addHandler(fh)
+
 class PumpProbeWorker(QtCore.QThread):
-    _progress = QtCore.pyqtSignal(str)
+    _progress = QtCore.pyqtSignal(list)
     _finished = QtCore.pyqtSignal()
     _queue_signal = QtCore.pyqtSignal(QtGui.QColor)
     _lockin_status = QtCore.pyqtSignal(str)
@@ -37,22 +46,26 @@ class PumpProbeWorker(QtCore.QThread):
         self._running_pp = False
 
     def connect_device(self, device, signal, name):
-        self._progress.emit(f"[{name}] Connecting...")
+        self._progress.emit([f"[{name}] Connecting...", logging.INFO])
         signal.emit("Connecting...")
-        result = device.connect().expected(f"[{name}] Could not connect:")
-        self._progress.emit(f"[{name}] {result.msg}")
+        result = device.connect()
         if result.err:
+            self._progress.emit([f"[{name}] {result.msg}", logging.ERROR])
             signal.emit("Disconnected")
         else:
+            self._progress.emit([f"[{name}] {result.msg}", logging.INFO])
             signal.emit("Connected")
-        return result
+
+        if result.err:
+            self._progress.emit([f"{name} did not connect. Please ensure {name} is able to communicate with local user.", logging.ERROR])
+            self._finished.emit()
     
     def save_data(self, exp, data):
         dt, volt_data = data
         # Save measurement data
         meta = exp.generate_csv_head()
         head = [['Voltage', 'Time Delay']]
-        body = np.concatenate((volt_data, dt), axis=1)
+        body = np.stack((volt_data, dt), axis=1)
         out_data = np.concatenate((head, body), axis=0)
         out = np.concatenate((meta, out_data), axis=0)
         out = pd.DataFrame(out)
@@ -75,20 +88,18 @@ class PumpProbeWorker(QtCore.QThread):
         self._new_arb = True
 
         # Check if devices are connected
-        lockin_result = self.connect_device(self.pump_probe.lockin, self._lockin_status, "Lock-in")
-        awg_result = self.connect_device(self.pump_probe.awg, self._awg_status, "AWG")
-        stm_result = self.connect_device(self.pump_probe.stm, self._stm_status, self.pump_probe.config.stm_model)
-        
-        # Report any errors with connecting.
-        for name, result in zip(["STM", "Lock-in", "AWG"], [stm_result, lockin_result, awg_result]):
-            if result.err:
-                self._progress.emit(f"[ERROR] {name} did not connect. Please ensure {name} is able to communicate with local user.")
-                self._finished.emit()
-                return
+        if not self.pump_probe.lockin.connected:
+            self.connect_device(self.pump_probe.lockin, self._lockin_status, "Lock-in")
+        if not self.pump_probe.awg.connected:
+            self.connect_device(self.pump_probe.awg, self._awg_status, "AWG")
+        if not self.pump_probe.stm.connected:
+            self.connect_device(self.pump_probe.stm, self._stm_status, self.pump_probe.config.stm_model)
+
+        time.sleep(1)
 
         # Check if experiment queue is empty
         if self.queue.rowCount() == 0:
-            self._progress.emit("[ERROR] Experiment queue is empty. Please fill queue with at least one experiment.")
+            self._progress.emit(["Experiment queue is empty. Please fill queue with at least one experiment.", logging.WARNING])
             self._finished.emit()
             return
 
@@ -143,22 +154,21 @@ class PumpProbeWorker(QtCore.QThread):
                     
                 
                 # Get tip position
+                log.debug('Getting stm position')
                 exp.stm_coords = self.pump_probe.stm.get_position()
                 try:
-                    self._progress.emit("Running pump-probe experiment.")
+                    self._progress.emit(["Running pump-probe experiment.", logging.INFO])
                     dt, volt_data = self.pump_probe.run(procedure=procedure, experiment_idx=exp_idx, new_arb=self._new_arb, plotter=self.plotter)
                 except Exception as e:
-                    traceback.print_exc()
-                    msg = f"[ERROR] {e}. "
+                    log.exception('Got exception on running pump probe.')
                     if "'send'" in repr(e):
-                        msg += " 'send' is a Lock-in method. Is the Lock-in connected properly?"
+                        self._progress.emit([f"{e} 'send' is a Lock-in method. Is the Lock-in connected properly?", logging.ERROR])
                     elif "'write'" in repr(e):
-                        msg += " 'write' is an AWG method. Is the AWG connected properly?"
-                    self._progress.emit(msg)
+                        self._progress.emit([f"{e} 'write' is an AWG method. Is the AWG connected properly?", logging.ERROR])
                     self._queue_signal.emit(QtGui.QColor(QtCore.Qt.red))
                     self._running_pp = False
                     self._finished.emit()
-                    return
+                    raise
                 
                 # Add zero line to plot
                 if procedure.proc_type == PumpProbeProcedureType.TIME_DELAY:
@@ -175,7 +185,7 @@ class PumpProbeWorker(QtCore.QThread):
             del self.queue.data[0]
             self.queue.removeRow(0)
         # Close thread
-        self._progress.emit("QThread finished. Pump-probe experiment(s) stopped.")
+        self._progress.emit(["QThread finished. Pump-probe experiment(s) stopped.", logging.INFO])
         self._finished.emit()
 
 class SettingsDialog(QtWidgets.QDialog):
@@ -229,7 +239,7 @@ class MainWindow(QtWidgets.QMainWindow):
         config = dict()
         for key in self.settings.allKeys():
             config[key] = self.settings.value(key, type=type(default_config[key]))
-            print(f"{key} : {self.settings.value(key)} - {type(default_config[key])}")
+            log.info(f"{key} : {self.settings.value(key)} - {type(default_config[key])}")
     
         
         self.PumpProbe = PumpProbe(stm=RHK_R9(), config=PumpProbeConfig(**config))
@@ -277,7 +287,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Table queue
         self.queue = QDataTable(self.centralwidget)
         self.queue.setGeometry(QtCore.QRect(280, 10, 821, 431))
-        self.queue.setRowCount(1)
+        self.queue.setRowCount(0)
         self.queue.setColumnCount(9)
         self.queue.setHorizontalHeaderItem(0, QtWidgets.QTableWidgetItem())
         self.queue.setHorizontalHeaderItem(1, QtWidgets.QTableWidgetItem())
@@ -810,10 +820,19 @@ class MainWindow(QtWidgets.QMainWindow):
     
     """
     """    
-    def report_progress(self, msg:str) -> None:
-        print(f"{msg}")
+    def report_progress(self, info:list) -> None:
+        msg, level = info
         self.statusbar.showMessage(msg)
-
+        if level == logging.DEBUG:
+            log.debug(msg)
+        elif level == logging.INFO:
+            log.info(msg)
+        elif level == logging.WARNING:
+            log.warn(msg)
+        elif level == logging.ERROR:
+            log.error(msg)
+        elif level == logging.CRITICAL:
+            log.critical(msg)
     """
     """
     def set_procedure_settings(self):
@@ -871,7 +890,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.plotter = QPlotter()
         self.worker = PumpProbeWorker(self.PumpProbe, self.queue, self.plotter)
 
-        self.worker.started.connect(lambda: self.report_progress("QThread started. Running pump-probe experiment(s)."))
+        self.worker.started.connect(lambda: self.report_progress(["QThread started. Running pump-probe experiment(s).", logging.INFO]))
         self.worker._progress.connect(self.report_progress)
         self.worker._lockin_status.connect(self.update_lockin_status)
         self.worker._awg_status.connect(self.update_awg_status)
@@ -1021,14 +1040,13 @@ class MainWindow(QtWidgets.QMainWindow):
             elif match == 'Image':
                 samples = self.image_frames.value()
                 domain = (-180, 180)
-                self.report_progress("Image functionality not implemented yet.")
+                self.report_progress(["Image functionality not implemented yet.", logging.DEBUG])
                 return
                 
             new_experiment = PumpProbeExperiment(pump=pump_pulse, probe=probe_pulse, domain=domain, samples=samples)
             procedure.experiments.append(new_experiment)
-        print("Added to queue:")
         for exp in procedure.experiments:
-            print(f'[ADDED] {exp}')
+            log.info(f'[ADDED TO QUEUE] {exp}')
         if self.overlay_checkbox.isChecked():
             procedure.single_plot = True
         else:
@@ -1044,9 +1062,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.queue.removeRow(rowIdx)
             # Remove experiment from queue data
             self.statusbar.showMessage("Experiment removed from queue.")
-            print("Experiment removed from queue:")
             for exp in self.queue.data[rowIdx].experiments:
-                print(f'[REMOVED] {exp}')
+                log.info(f'[REMOVED FROM QUEUE] {exp}')
             del self.queue.data[rowIdx]
 
     """
@@ -1082,7 +1099,7 @@ class MainWindow(QtWidgets.QMainWindow):
         save_path = QtWidgets.QFileDialog.getExistingDirectory(self, 'Set Save Path', self.PumpProbe.config.save_path)
         self.PumpProbe.config.save_path = save_path
         self.settings.setValue('save_path', save_path)
-        self.report_progress(f"Save path set to {self.PumpProbe.config.save_path}")
+        self.report_progress([f"Save path set to {self.PumpProbe.config.save_path}", logging.INFO])
 
     """
     Opens a dialog window with configuration options. Stores in QSettings object
@@ -1090,7 +1107,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def edit_settings(self):
         settings_dialog = SettingsDialog(self.settings)
         if settings_dialog.exec_():
-            self.report_progress("Settings updated.")
+            self.report_progress(["Settings updated.", logging.INFO])
     
     """
     """
