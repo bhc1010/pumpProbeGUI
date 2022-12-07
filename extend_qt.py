@@ -59,9 +59,11 @@ class PlotFFT(ToolBase):
 
 class FlipData(ToolBase):
     def trigger(self, *args, **kwargs):
+        ax = self.figure.axes[0]
         line = self.figure.axes[0].lines[0]
         voltage = np.array(line.get_data()[1])
         line.set_ydata(-voltage)
+        ax.autoscale_view()
 
 class GenerateDerivativePlotButton(ToolBase):
     """
@@ -138,7 +140,14 @@ class QPlotter(QtCore.QObject):
         plt.subplots_adjust(right=0.725)
         line = ax.plot(self.xdata, self.ydata, label=line_name)[0]
         self.lines.append(line)
-        plt.text(1.05, 0.25, procedure_info, transform=ax.transAxes)
+        info_display = ""
+        for line in procedure_info:
+            for i, text in enumerate(line):
+                info_display = info_display + text
+                if i == 0:
+                    info_display += ' : '
+            info_display += '\n'
+        plt.text(1.05, 0.25, info_display, transform=ax.transAxes)
         if line_name:
             plt.legend()
         
