@@ -12,14 +12,15 @@ from scientific_spinbox import ScienDSpinBox
 from datetime import datetime
 
 plt.ion()
-
+if not os.path.isdir('log'):
+    os.mkdir('log')
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
 formatter = logging.Formatter(fmt="%(asctime)s %(levelname)s: %(message)s")
 ch = logging.StreamHandler(sys.stdout)
 ch.setLevel(logging.DEBUG)
 ch.setFormatter(formatter)
-fh = logging.FileHandler("debug.log", "w")
+fh = logging.FileHandler("log/log", "w")
 fh.setLevel(logging.DEBUG)
 fh.setFormatter(formatter)
 log.addHandler(ch)
@@ -70,15 +71,18 @@ class PumpProbeWorker(QtCore.QThread):
         out = np.concatenate((meta, out_data), axis=0)
         out = pd.DataFrame(out)
 
+        for invalid_path_char in [':', '-', '.']:
+            exp.date = exp.date.replace(invalid_path_char, '_')
+
         path = self.pump_probe.config.save_path
-        out.to_csv(os.path.join(path, f'{exp.name}.csv'), index=False, header=False)
+        out.to_csv(os.path.join(path, f'{exp.date}.csv'), index=False, header=False)
 
         # Save figure as png preview
         path = os.path.join(path, 'pngpreview')
         if not os.path.isdir(path):
             os.mkdir(path)
         meta = exp.generate_meta()
-        plt.savefig(f'{os.path.join(path, exp.name)}.png', metadata=meta)
+        plt.savefig(f'{os.path.join(path, exp.date)}.png', metadata=meta)
 
     def run(self):
         """
@@ -114,7 +118,7 @@ class PumpProbeWorker(QtCore.QThread):
             
             # Run pump-probe experiment. If not a repeated pulse, send new pulse data to AWG
             for exp_idx, exp in enumerate(procedure.experiments):
-                exp.name = str(datetime.now().strftime("%Y%m%d %H-%M-%S"))
+                exp.date = str(datetime.utcnow().isoformat(sep=' ', timespec='milliseconds'))
                 
                 try:
                     prev_exp = self.pump_probe.prev_exp
@@ -154,11 +158,10 @@ class PumpProbeWorker(QtCore.QThread):
                     
                 
                 # Get tip position
-                log.debug('Getting stm position')
-                exp.stm_coords = self.pump_probe.stm.get_position()
+                exp.stm_coords = self.pump_probe.stm.get_tip_position()
                 try:
                     self._progress.emit(["Running pump-probe experiment.", logging.INFO])
-                    dt, volt_data = self.pump_probe.run(procedure=procedure, experiment_idx=exp_idx, new_arb=self._new_arb, plotter=self.plotter)
+                    dt, volt_data = self.pump_probe.run(procedure=procedure, experiment_idx=exp_idx, new_arb=self._new_arb, logger=log, plotter=self.plotter)
                 except Exception as e:
                     log.exception('Got exception on running pump probe.')
                     if "'send'" in repr(e):
@@ -252,7 +255,7 @@ class MainWindow(QtWidgets.QMainWindow):
     """
     """
     def setupUi(self):
-        self.setFixedSize(1111, 751)
+        self.setFixedSize(1111, 752)
 
         self.centralwidget = QtWidgets.QWidget(self)
         
