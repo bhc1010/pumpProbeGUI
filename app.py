@@ -20,7 +20,9 @@ formatter = logging.Formatter(fmt="%(asctime)s %(levelname)s: %(message)s")
 ch = logging.StreamHandler(sys.stdout)
 ch.setLevel(logging.DEBUG)
 ch.setFormatter(formatter)
-fh = logging.FileHandler("log/log", "w")
+logtime = datetime.utcnow().isoformat(sep=' ', timespec='milliseconds')
+logtime = logtime.replace(':', '_').replace(' ', '_').replace('.', '_')
+fh = logging.FileHandler(f"log/{logtime}_log", "w")
 fh.setLevel(logging.DEBUG)
 fh.setFormatter(formatter)
 log.addHandler(ch)
@@ -51,10 +53,10 @@ class PumpProbeWorker(QtCore.QThread):
         signal.emit("Connecting...")
         result = device.connect()
         if result.err:
-            self._progress.emit([f"[{name}] {result.msg}", logging.ERROR])
+            self._progress.emit([f"[{name}] {result.value()}", logging.ERROR])
             signal.emit("Disconnected")
         else:
-            self._progress.emit([f"[{name}] {result.msg}", logging.INFO])
+            self._progress.emit([f"[{name}] {result.value()}", logging.INFO])
             signal.emit("Connected")
 
         if result.err:
@@ -138,7 +140,7 @@ class PumpProbeWorker(QtCore.QThread):
                 # Get line name
                 if len(procedure.experiments) > 1:
                     for prop in exp.__dict__:
-                        if prop == 'name':
+                        if prop == 'date':
                             continue
                         if procedure.experiments[0].__dict__[prop] != procedure.experiments[1].__dict__[prop]:
                             for param in exp.__dict__[prop].__dict__:
@@ -158,9 +160,8 @@ class PumpProbeWorker(QtCore.QThread):
                     
                 
                 # Get tip position
-                exp.stm_coords = self.pump_probe.stm.get_tip_position()
+                exp.stm_coords = self.pump_probe.stm.get_tip_position().expected("Tip position not aquired.", logger=log).value()
                 try:
-                    self._progress.emit(["Running pump-probe experiment.", logging.INFO])
                     dt, volt_data = self.pump_probe.run(procedure=procedure, experiment_idx=exp_idx, new_arb=self._new_arb, logger=log, plotter=self.plotter)
                 except Exception as e:
                     log.exception('Got exception on running pump probe.')
@@ -247,6 +248,7 @@ class MainWindow(QtWidgets.QMainWindow):
         
         self.PumpProbe = PumpProbe(stm=RHK_R9(), config=PumpProbeConfig(**config))
         self.PumpProbe.plotter = QPlotter()
+        self.destroyed.connect(self._on_destroyed)
         self.retranslateUi()
         self.procedure_dict = {'procedure' : 'Time delay', 'procedure_channel' : 'Probe',
                                'procedure_start' : 0.0, 'procedure_end' : 0.0,
@@ -792,6 +794,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_reset_connected_devices.triggered.connect(self.reset_triggered)
         self.action_edit_settings.triggered.connect(self.edit_settings)
     
+    def _on_destroyed(self):
+        self.PumpProbe.stm.set_tip_control('Retract')
+
     """
     """ 
     def reset_triggered(self):
