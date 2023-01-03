@@ -2,4 +2,4 @@
 
 Makes use of PyQT5 and ppspectroscopy to run pump-probe spectroscopy via a scanning tunneling microscope.
 
-![alt text](http://github.com/bhc1010/pyppspecGUI/gui.png?raw=true)
+![alt text](https://github.com/bhc1010/pyppspecGUI/blob/master/gui.png)
