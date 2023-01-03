@@ -173,14 +173,14 @@ class PumpProbeWorker(QtCore.QThread):
         self._new_arb = True
 
         # Check if devices are connected
-        # if not self.pump_probe.lockin.connected:
-        #     self.connect_device(self.pump_probe.lockin, self._lockin_status, "Lock-in")
-        # if not self.pump_probe.awg.connected:
-        #     self.connect_device(self.pump_probe.awg, self._awg_status, "AWG")
-        # if not self.pump_probe.stm.connected:
-        #     self.connect_device(self.pump_probe.stm, self._stm_status, self.pump_probe.config.stm_model)
+        if not self.pump_probe.lockin.connected:
+            self.connect_device(self.pump_probe.lockin, self._lockin_status, "Lock-in")
+        if not self.pump_probe.awg.connected:
+            self.connect_device(self.pump_probe.awg, self._awg_status, "AWG")
+        if not self.pump_probe.stm.connected:
+            self.connect_device(self.pump_probe.stm, self._stm_status, self.pump_probe.config.stm_model)
 
-        # time.sleep(1)
+        time.sleep(1)
 
         # Check if experiment queue is empty
         if self.queue.rowCount() == 0:
@@ -229,7 +229,7 @@ class PumpProbeWorker(QtCore.QThread):
                 self._set_line.emit({'label' : line_name, 'linewidth' : 0.9})
 
                 ## Get tip position
-                # exp.stm_coords = self.pump_probe.stm.get_tip_position().expected("Tip position not aquired.", logger=log).value()
+                exp.stm_coords = self.pump_probe.stm.get_tip_position().expected("Tip position not aquired.", logger=log).value()
                 
                 # Run pump probe procedure
                 self._new_arb = False
