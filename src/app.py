@@ -45,6 +45,7 @@ class PumpProbeWorker(QtCore.QThread):
     _set_line = QtCore.pyqtSignal(dict)
     _add_average = QtCore.pyqtSignal()
     _zero_line = QtCore.pyqtSignal(float)
+    _add_tools = QtCore.pyqtSignal()
 
     def __init__(self, pump_probe:PumpProbe, queue: QDataTable, plotter: QPlotter) -> None:
         super().__init__(parent=None)
@@ -153,7 +154,8 @@ class PumpProbeWorker(QtCore.QThread):
         out.append(['edge', f'{exp.probe.edge}'])
         out.append(['[Settings]', ''])
         out.append(['domain', f'({exp.domain[0] * exp.conversion_factor}ns, {exp.domain[1] * exp.conversion_factor}ns)'])
-        out.append(['samples', f'{exp.samples}'])
+        out.append(['samples', str(exp.samples)])
+        out.append(['spectra', str(exp.spectra)])
         out.append(['fixed time delay', f'{exp.fixed_time_delay}'])
         return out
     
@@ -180,8 +182,6 @@ class PumpProbeWorker(QtCore.QThread):
             self.connect_device(self.pump_probe.awg, self._awg_status, "AWG")
         if not self.pump_probe.stm.connected:
             self.connect_device(self.pump_probe.stm, self._stm_status, self.pump_probe.config.stm_model)
-
-        time.sleep(1)
 
         # Check if experiment queue is empty
         if self.queue.rowCount() == 0:
@@ -223,7 +223,8 @@ class PumpProbeWorker(QtCore.QThread):
                 self._make_figure.emit([self.generate_info(exp), self.generate_domain_title(procedure)])
                 
                 # Add average line
-                self._add_average.emit()
+                if exp.spectra > 1:
+                    self._add_average.emit()
 
                 # Add first line
                 self._add_line.emit()
@@ -258,6 +259,9 @@ class PumpProbeWorker(QtCore.QThread):
                 
                 # Set previous experment
                 self.pump_probe.prev_exp = exp
+
+                # Add interactive tools to the figure
+                self._add_tools.emit()
             
             if procedure.mk_overlay_plot:
                 self._make_figure.emit(["test", self.generate_domain_title(procedure)])
@@ -268,7 +272,7 @@ class PumpProbeWorker(QtCore.QThread):
                     volt_ave = np.mean(volt_data[k], axis=0)
                     volt_err = np.std(volt_data[k], axis=0)
                     self._set_line.emit({'data' : [dt, volt_ave], 'error' : volt_err, 'lw' : 1, 'c' : color.RGB(), 'fc' : color.RGB(use_default_l_scale=True), 'label' : f'Spectra{k}'})
-            
+
             # Remove experiment from queue data and top row
             del self.queue.data[0]
             self.queue.removeRow(0)
@@ -280,30 +284,140 @@ class PreferencesDialog(QDialog):
     def __init__(self, settings: QtCore.QSettings) -> None:
         super().__init__()
         self.settings = settings
+        self.set_ui()
         
+    def set_ui(self):    
+        self.setFixedSize(395, 265)
+        self.new_settings = list()
+        
+        self.Accept = QDialogButtonBox(self)
+        self.Accept.setGeometry(QtCore.QRect(20, 230, 361, 32))
+        self.Accept.setOrientation(QtCore.Qt.Horizontal)
+        self.Accept.setStandardButtons(QDialogButtonBox.Apply|QDialogButtonBox.Cancel|QDialogButtonBox.Save)
+        self.Accept.setObjectName("Accept")
+        self.gridLayoutWidget = QWidget(self)
+        self.gridLayoutWidget.setGeometry(QtCore.QRect(9, 9, 371, 221))
+        self.gridLayoutWidget.setObjectName("gridLayoutWidget")
+        self.gridLayout = QGridLayout(self.gridLayoutWidget)
+        self.gridLayout.setContentsMargins(0, 0, 0, 0)
+        self.gridLayout.setObjectName("gridLayout")
+        
+        # Add line edits
+        self.awg_id = QLineEdit(self.gridLayoutWidget)
+        self.new_settings.append(self.awg_id)
+        self.awg_id.setObjectName("awg_id")
+        self.gridLayout.addWidget(self.awg_id, 0, 1, 1, 2)
+                        
+        self.lockin_ip = QLineEdit(self.gridLayoutWidget)
+        self.new_settings.append(self.lockin_ip)
+        self.lockin_ip.setObjectName("lockin_ip")
+        self.gridLayout.addWidget(self.lockin_ip, 1, 1, 1, 2)
+        
+        self.lockin_port = QLineEdit(self.gridLayoutWidget)
+        self.new_settings.append(self.lockin_port)
+        self.lockin_port.setObjectName("lockin_port")
+        self.gridLayout.addWidget(self.lockin_port, 2, 1, 1, 2)
+        
+        self.sample_rate = QLineEdit(self.gridLayoutWidget)
+        self.new_settings.append(self.sample_rate)
+        self.sample_rate.setObjectName("sample_rate")
+        self.gridLayout.addWidget(self.sample_rate, 3, 1, 1, 2)
+        
+        self.lockin_freq = QLineEdit(self.gridLayoutWidget)
+        self.new_settings.append(self.lockin_freq)
+        self.lockin_freq.setObjectName("lockin_freq")
+        self.gridLayout.addWidget(self.lockin_freq, 4, 1, 1, 2)
+        
+        self.stm_model = QLineEdit(self.gridLayoutWidget)
+        self.new_settings.append(self.stm_model)
+        self.stm_model.setObjectName("stm_model")
+        self.gridLayout.addWidget(self.stm_model, 5, 1, 1, 2)
+        
+        self.file_save_name = QLineEdit(self.gridLayoutWidget)
+        self.new_settings.append(self.file_save_name)
+        self.file_save_name.setObjectName("file_save_name")
+        self.gridLayout.addWidget(self.file_save_name, 6, 1, 1, 2)
+                
+        self.save_path = QLineEdit(self.gridLayoutWidget)
+        self.new_settings.append(self.save_path)
+        self.save_path.setObjectName("save_path")
+        self.gridLayout.addWidget(self.save_path, 7, 1, 1, 1)
+        
+        # Add labels
+        self.lockin_freq_label = QLabel(self.gridLayoutWidget)
+        self.lockin_freq_label.setObjectName("lockin_freq_label")
+        self.gridLayout.addWidget(self.lockin_freq_label, 4, 0, 1, 1)
+        
+        self.save_path_label = QLabel(self.gridLayoutWidget)
+        self.save_path_label.setObjectName("save_path_label")
+        self.gridLayout.addWidget(self.save_path_label, 7, 0, 1, 1)
+        
+        self.set_save_dir_button = QPushButton(self.gridLayoutWidget)
+        self.set_save_dir_button.setObjectName("set_save_dir_button")
+        self.gridLayout.addWidget(self.set_save_dir_button, 7, 2, 1, 1)
+        
+        self.stm_model_label = QLabel(self.gridLayoutWidget)
+        self.stm_model_label.setObjectName("stm_model_label")
+        self.gridLayout.addWidget(self.stm_model_label, 5, 0, 1, 1)
+        
+        self.lockin_ip_label = QLabel(self.gridLayoutWidget)
+        self.lockin_ip_label.setObjectName("lockin_ip_label")
+        self.gridLayout.addWidget(self.lockin_ip_label, 1, 0, 1, 1)
+        
+        self.sample_rate_label = QLabel(self.gridLayoutWidget)
+        self.sample_rate_label.setObjectName("sample_rate_label")
+        self.gridLayout.addWidget(self.sample_rate_label, 3, 0, 1, 1)
+        
+        self.lockin_port_label = QLabel(self.gridLayoutWidget)
+        self.lockin_port_label.setObjectName("lockin_port_label")
+        self.gridLayout.addWidget(self.lockin_port_label, 2, 0, 1, 1)
+
+        self.awg_id_label = QLabel(self.gridLayoutWidget)
+        self.awg_id_label.setObjectName("awg_id_label")
+        self.gridLayout.addWidget(self.awg_id_label, 0, 0, 1, 1)
+
+        self.file_save_name_label = QLabel(self.gridLayoutWidget)
+        self.file_save_name_label.setObjectName("file_save_name_label")
+        self.gridLayout.addWidget(self.file_save_name_label, 6, 0, 1, 1)
+        
+        # Retranslate UI
         self.setWindowTitle("Preferences")
-        self.setMinimumSize(450, 225)
-        self.layout = QFormLayout(self)
-        self.labels = list()
-        self.keys = list()
-        for i, key in enumerate(self.settings.allKeys()):
-            self.labels.append(QLabel(self))
-            self.keys.append(QLineEdit(self))
-            self.layout.setWidget(i, QFormLayout.LabelRole, self.labels[-1])
-            self.layout.setWidget(i, QFormLayout.FieldRole, self.keys[-1])
-            self.labels[-1].setText(key)
-            self.keys[-1].setText(str(self.settings.value(key)))
-        self.accept_btn = QPushButton(self)
-        self.accept_btn.setText("Accept")
-        self.layout.setWidget(len(self.labels), QFormLayout.SpanningRole, self.accept_btn)
+        self.lockin_freq_label.setText("Lock-in frequency")
+        self.save_path_label.setText("Save path")
+        self.set_save_dir_button.setText("Set save directory")
+        self.stm_model_label.setText("STM model")
+        self.lockin_ip_label.setText("Lock-in IP")
+        self.sample_rate_label.setText("AWG sample rate")
+        self.lockin_port_label.setText("Lock-in port")
+        self.awg_id_label.setText("AWG ID")
+        self.file_save_name_label.setText("File save name")
         
-        self.accept_btn.clicked.connect(self.on_exit)
+        # Set current values
+        self.awg_id.setText(str(self.settings.value('awg_id')))
+        self.lockin_ip.setText(str(self.settings.value('lockin_ip')))
+        self.lockin_port.setText(str(self.settings.value('lockin_port')))
+        self.sample_rate.setText(str(self.settings.value('sample_rate')))
+        self.lockin_freq.setText(str(self.settings.value('lockin_freq')))
+        self.stm_model.setText(str(self.settings.value('stm_model')))
+        self.file_save_name.setText(str(self.settings.value('file_save_name')))
+        self.save_path.setText(str(self.settings.value('save_path')))
         
-    def on_exit(self):
-        for i, label in enumerate(self.labels):
-            self.settings.setValue(label.text(), self.keys[i].text())
+        self.Accept.accepted.connect(self.accept)
+        self.Accept.rejected.connect(self.reject)
+        self.Accept.clicked.connect(self.apply)
+        QtCore.QMetaObject.connectSlotsByName(self)
+        
+    def accept(self):
+        for setting in self.new_settings:
+            self.settings.setValue(setting.objectName(), setting.text())
             
-        self.accept()
+        self.reject()
+        
+    def apply(self, btn):
+        role = self.Accept.buttonRole(btn)
+        if role == QDialogButtonBox.ApplyRole:
+            for setting in self.new_settings:
+                self.settings.setValue(setting.objectName(), setting.text())
 
 class MainWindow(QMainWindow):
     """
@@ -313,10 +427,10 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setupUi()
-        self.default_config = dict(stm_model="RHK R9", 
-                              lockin_ip = "169.254.11.17", lockin_port=50_000, lockin_freq = 1007,
+        self.default_config = dict(stm_model='RHK R9', 
+                              lockin_ip = '169.254.11.17', lockin_port=50_000, lockin_freq = 1007,
                               awg_id='USB0::0x0957::0x5707::MY53805152::INSTR', 
-                              sample_rate=1e9, save_path="")
+                              sample_rate=1e9, save_path='', file_save_name='')
         
         # Setup PumpProbeConfig
         self.settings = QtCore.QSettings('HollenLab', 'pump-probe')
@@ -471,6 +585,13 @@ class MainWindow(QMainWindow):
         self.time_delay_sample_size.setMaximum(9999)
         self.time_delay_procedure_settings_layout.addWidget(self.time_delay_sample_size, 1, 1, 1, 1)
         
+        # Time delay spectra
+        self.time_delay_spectra_label = QLabel(self.time_delay_procedure_settings_layout_outer)
+        self.time_delay_procedure_settings_layout.addWidget(self.time_delay_spectra_label, 2, 0, 1, 1)
+        self.time_delay_spectra = QSpinBox(self.time_delay_procedure_settings_layout_outer)
+        self.time_delay_spectra.setMinimum(1)
+        self.time_delay_procedure_settings_layout.addWidget(self.time_delay_spectra, 2, 1, 1, 1)
+        
         # Time delay spacing
         self.spacer_x = QLabel(self.time_delay_procedure_settings_layout_outer)
         self.spacer_x.setText("")
@@ -480,7 +601,7 @@ class MainWindow(QMainWindow):
         self.time_delay_procedure_settings_layout.addWidget(self.spacer_x_2, 0, 3, 1, 1)
         self.spacer_y = QLabel(self.time_delay_procedure_settings_layout_outer)
         self.spacer_y.setText("")
-        self.time_delay_procedure_settings_layout.addWidget(self.spacer_y, 2, 0, 1, 1)
+        self.time_delay_procedure_settings_layout.addWidget(self.spacer_y, 3, 0, 1, 1)
         
         # Amplitude procedure settings layout
         self.amp_procedure_settings_layout_outer = QWidget(self.procedure_settings_box)
@@ -739,6 +860,7 @@ class MainWindow(QMainWindow):
         # Time delay procedure settings
         self.time_delay_time_spread_label.setText("Time spread:")
         self.time_delay_sample_size_label.setText("Sample size:")
+        self.time_delay_spectra_label.setText('Number of spectra:')
         
         # Amp procedure settings
         self.amp_procedure_channel_label.setText("Channel:")
@@ -1020,9 +1142,9 @@ class MainWindow(QMainWindow):
         self.worker._add_average.connect(self.plotter.add_average_line)
         self.worker._set_line.connect(self.plotter.set_line)
         self.worker._zero_line.connect(self.plotter.zero_line)
+        self.worker._add_tools.connect(self.plotter.add_tools)
         self.plotter._plot.connect(self.plotter.update_figure)
         self.plotter._new_line.connect(self.plotter.add_line)
-
 
         self.procedure_btn.setText("Stop procedures")
         self.procedure_btn.clicked.disconnect()
@@ -1110,7 +1232,8 @@ class MainWindow(QMainWindow):
         procedure = self.get_selected_procedure()
         
         if self.sweep_box.isChecked():
-            sweep_range = np.arange(self.sweep_start.value(), self.sweep_end.value(), self.sweep_step.value())
+            step = self.sweep_step.value()
+            sweep_range = np.arange(self.sweep_start.value(), self.sweep_end.value() + step, step)
             steps = len(sweep_range)
         
         sweep_param = self.sweep_parameter.currentText()
@@ -1166,7 +1289,7 @@ class MainWindow(QMainWindow):
                 self.report_progress(["Image functionality not implemented yet.", logging.DEBUG])
                 return
                 
-            new_experiment = PumpProbeExperiment(pump=pump_pulse, probe=probe_pulse, domain=domain, conversion_factor=conversion_factor, samples=samples, spectra=5)
+            new_experiment = PumpProbeExperiment(pump=pump_pulse, probe=probe_pulse, domain=domain, conversion_factor=conversion_factor, samples=samples, spectra=self.time_delay_spectra.value())
             procedure.experiments.append(new_experiment)
         for exp in procedure.experiments:
             log.info(f'[ADDED TO QUEUE] {exp}')
