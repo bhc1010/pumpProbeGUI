@@ -9,11 +9,11 @@ from PyQt5.QtWidgets import *
 from datetime import datetime
 from typing import List
 
-from extend_qt import QDataTable, QDataTableRow, QPlotter
+from src.extend_qt import QDataTable, QDataTableRow, QPlotter
 from pyppspec.pumpprobe import PumpProbeProcedure, PumpProbeProcedureType, PumpProbe, PumpProbeConfig, PumpProbeExperiment, Pulse, Channel
 from pyppspec.devices import RHK_R9
-from colors import Color
-from scientific_spinbox import ScienDSpinBox
+from src.colors import Color
+from src.scientific_spinbox import ScienDSpinBox
 
 
 plt.ion()
@@ -72,6 +72,7 @@ class PumpProbeWorker(QtCore.QThread):
     
     def save_data(self, exp, data):
         t, volt_data = data
+        
         # Save measurement data
         info = self.generate_info(exp)
         head = [[f'Voltage{i}'] for i in range(len(volt_data))]
@@ -259,7 +260,7 @@ class PumpProbeWorker(QtCore.QThread):
                 self.pump_probe.prev_exp = exp
             
             if procedure.mk_overlay_plot:
-                self._make_figure.emit(["test", procedure.generate_domain_title()])
+                self._make_figure.emit(["test", self.generate_domain_title(procedure)])
                 for k in range(len(procedure.experiments)):
                     color = next(overlay_colors)
                     self._add_line.emit()
@@ -1109,8 +1110,8 @@ class MainWindow(QMainWindow):
         procedure = self.get_selected_procedure()
         
         if self.sweep_box.isChecked():
-            steps += int((self.sweep_end.value() - self.sweep_start.value()) // self.sweep_step.value())
-            sweep_range = np.linspace(self.sweep_start.value(), self.sweep_end.value(), steps)
+            sweep_range = np.arange(self.sweep_start.value(), self.sweep_end.value(), self.sweep_step.value())
+            steps = len(sweep_range)
         
         sweep_param = self.sweep_parameter.currentText()
         sweep_ch = self.sweep_channel.currentText()
