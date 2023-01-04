@@ -33,83 +33,23 @@ class QDataTable(QtWidgets.QTableWidget):
         for col_idx, key in enumerate(row.__dict__.keys()):
             self.setItem(row_idx, col_idx, QtWidgets.QTableWidgetItem(row.__dict__[key]))
 
-class PlotFFT(ToolBase):
-    def trigger(self, *args, **kwargs):
-        self.generate_fft()
-        
-    def generate_fft(self):
-        fig = self.figure
-        data = fig.axes[0].lines[0].get_data()
-        time = np.array(data[0])
-        voltage = np.array(data[1])
-        
-        # calculate FFT
-        n = len(time)
-        fhat = np.fft.fft(voltage, n)
-        PSD = fhat * np.conj(fhat) / n
-        # T = time[-1] - time[0]
-        dt = time[1] - time[0]
-        T = dt * n
-        freq = (1 / T) * np.arange(n)
-        L = np.arange(1, np.floor(n/2), dtype='int')
-
-        # Plot PSD on new plot
-        fig, ax = plt.subplots(1,1)
-        ax.plot(freq[L], PSD[L])
-        ax.set_xlabel('Frequency')
-        ax.set_ylabel('Power Spectrum Density')
-        ax.set_title('FFT Power Spectrum Density')
-
 class FlipData(ToolBase):
     def trigger(self, *args, **kwargs):
         ax = self.figure.axes[0]
-        line = self.figure.axes[0].lines[0]
-        voltage = np.array(line.get_data()[1])
-        line.set_ydata(-voltage)
+        for line in self.figure.axes[0].lines[:-2]:
+            voltage = np.array(line.get_data()[1])
+            line.set_ydata(-voltage)
+            
+        ax.relim()
         ax.autoscale_view()
 
-class GenerateDerivativePlotButton(ToolBase):
-    """
-    """
-    description = 'Generate derivative plot'
-        
+class AutocorLines(ToolBase):
     def trigger(self, *args, **kwargs):
-        self.generate_derivative()
-    
-    def generate_derivative(self: ToolBase):
-        fig = self.figure
-        data = fig.axes[0].lines[0].get_data()
-        time = np.array(data[0])
-        voltage = np.array(data[1])
-        
-        zero = fig.axes[0].lines[1].get_data()[0][0]
-        
-        # Replot measured data
-        plt.clf()
-        ax1 = fig.add_subplot(211)
-        ax1.plot(time, voltage)
-        plt.title("Pump-probe Spectroscopy")
-        plt.tick_params(axis='x',          # changes apply to the x-axis
-                        which='both',      # both major and minor ticks are affected
-                        bottom=False,      # ticks along the bottom edge are off
-                        top=False,         # ticks along the top edge are off
-                        labelbottom=False)
-        plt.ylabel(r"Voltage (V)")
-        ax1.axvline(zero, color='r', linestyle='--')
-        plt.grid(True)
-        
-        # Calculate derivative
-        dVdt = np.diff(voltage, axis=0) / np.diff(time)
-        
-        # Plot derivative data
-        ax2 = fig.add_subplot(212, sharex=ax1)
-        ax2.plot(time[0:-1], dVdt, color='g')
-        plt.title("Pump-probe dV/dt")
-        plt.xlabel(r"Time delay, $\Delta t$ (ns)")
-        plt.ylabel(r"dV/dt (V/ns)")
-        ax2.axvline(zero, color='r', linestyle='--')
-        plt.grid(True)
-        plt.draw()
+        ax = self.figure.axes[0]
+        vlines = ax.lines[-2:]
+        vis_value = vlines[0].get_visible()
+        for line in vlines:
+            line.set_visible(not vis_value)
         
 class QPlotter(QtCore.QObject):
     """
@@ -147,16 +87,20 @@ class QPlotter(QtCore.QObject):
                         if '-' not in text:
                             info_display += ' : '
             info_display += '\n'
-        plt.text(1.05, 0.25, info_display, transform=ax.transAxes)
+        plt.text(1.05, 0.15, info_display, transform=ax.transAxes)
         
-    def add_fig_tools(self):
+    def add_tools(self):
         # Add custom tools to figure
         self.fig.canvas.manager.toolmanager.add_tool('Flip Data', FlipData)
         self.fig.canvas.manager.toolbar.add_tool('Flip Data', 'custom')
+        
+        self.fig.canvas.manager.toolmanager.add_tool('Show/hide autocorrelation lines', AutocorLines)
+        self.fig.canvas.manager.toolbar.add_tool('Show/hide autocorrelation lines', 'custom')
 
     def add_average_line(self):
         ax = self.fig.axes[0]
         self.average = ax.plot([0,0], c='black', label='Average', zorder=9999)[0]
+        plt.legend()
         
     def add_line(self):
         self.clr_data()
@@ -190,12 +134,11 @@ class QPlotter(QtCore.QObject):
         self.lines[-1].set_data(self.xdata, self.ydata)
         
         # update average plot
-        cur_len = len(self.lines[-1].get_ydata())
-        ydata = []
-        for line in self.lines:
-            ydata.append(line.get_ydata()[:cur_len])
-        
-        if self.average:
+        if 'average' in self.__dict__.keys():
+            cur_len = len(self.lines[-1].get_ydata())
+            ydata = []
+            for line in self.lines:
+                ydata.append(line.get_ydata()[:cur_len])
             self.average.set_data(self.xdata, np.average(ydata, axis=0))            
         
         # rescale
@@ -204,7 +147,7 @@ class QPlotter(QtCore.QObject):
         ax.autoscale_view()
         
     def zero_line(self, zero: float):
-        plt.axvline(zero, color = 'r', linestyle='--')
+        plt.axvline(zero, color = 'r', linestyle='--', visible=False)
 
     def add_data(self, x:float, y:float):
         self.xdata.append(x)
