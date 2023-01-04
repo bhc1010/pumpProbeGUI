@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from colors import Color
+from src.colors import Color
 
 plt.rcParams['toolbar'] = 'toolmanager'
 
@@ -192,7 +192,7 @@ class QPlotter(QtCore.QObject):
         # update average plot
         cur_len = len(self.lines[-1].get_ydata())
         ydata = []
-        for line in self.lines[1:]:
+        for line in self.lines:
             ydata.append(line.get_ydata()[:cur_len])
         
         if self.average:
