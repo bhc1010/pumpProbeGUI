@@ -15,8 +15,9 @@ from pyppspec.devices import RHK_R9
 from src.colors import Color
 from src.scientific_spinbox import ScienDSpinBox
 
-
 plt.ion()
+
+## Setup logging
 if not os.path.isdir('log'):
     os.mkdir('log')
 log = logging.getLogger(__name__)
@@ -93,7 +94,9 @@ class PumpProbeWorker(QtCore.QThread):
 
         path = self.pump_probe.config.save_path
         fname = os.path.split(path)[-1].split('-')[-1][1:]
-        out.to_csv(os.path.join(path, f'{fname}_{exp.date}.csv'), index=False, header=False)
+        out_path = os.path.join(path, f'{fname}_{exp.date}.csv')
+        out.to_csv(out_path, index=False, header=False)
+        log.info(f'Saved data to {out_path}')
 
         # Save figure as png preview
         path = os.path.join(path, 'pngpreview')
@@ -105,7 +108,7 @@ class PumpProbeWorker(QtCore.QThread):
     def get_line_name(self, procedure, exp):
         if len(procedure.experiments) > 1:
             for prop in exp.__dict__:
-                if prop == 'date':
+                if prop in ['date', 'stm_coords']:
                     continue
                 if procedure.experiments[0].__dict__[prop] != procedure.experiments[1].__dict__[prop]:
                     for param in exp.__dict__[prop].__dict__:
@@ -163,7 +166,7 @@ class PumpProbeWorker(QtCore.QThread):
         if proc.proc_type == PumpProbeProcedureType.TIME_DELAY:
             domain_title = r'Time delay, $\Delta t$ (ns)'
         elif proc.proc_type == PumpProbeProcedureType.AMPLITUDE:
-            domain_title = f'{self.channel.name.title()} amplitude (V)'
+            domain_title = f'{proc.channel.name.title()} amplitude (V)'
         else:
             domain_title = ''
         return domain_title
@@ -182,6 +185,8 @@ class PumpProbeWorker(QtCore.QThread):
             self.connect_device(self.pump_probe.awg, self._awg_status, "AWG")
         if not self.pump_probe.stm.connected:
             self.connect_device(self.pump_probe.stm, self._stm_status, self.pump_probe.config.stm_model)
+
+        time.sleep(0.1)
 
         # Check if experiment queue is empty
         if self.queue.rowCount() == 0:
@@ -206,7 +211,11 @@ class PumpProbeWorker(QtCore.QThread):
             
             # Run pump-probe experiment. If not a repeated pulse, send new pulse data to AWG
             for k, exp in enumerate(procedure.experiments):
+                # Experiment creation date
                 exp.date = str(datetime.utcnow().isoformat(sep=' ', timespec='milliseconds'))
+
+                # Get tip position
+                exp.stm_coords = self.pump_probe.stm.get_tip_position().expected("Tip position not aquired.", logger=log).value()
                 
                 try:
                     prev_exp = self.pump_probe.prev_exp
@@ -230,11 +239,7 @@ class PumpProbeWorker(QtCore.QThread):
                 self._add_line.emit()
                 self._set_line.emit({'label' : line_name, 'linewidth' : 0.9})
 
-                ## Get tip position
-                exp.stm_coords = self.pump_probe.stm.get_tip_position().expected("Tip position not aquired.", logger=log).value()
-                
                 # Run pump probe procedure
-                self._new_arb = False
                 try:
                     dt, volt_data[k] = self.pump_probe.run(procedure=procedure, experiment_idx=k, new_arb=self._new_arb, logger=log, plotter=self.plotter)
                 except Exception as e:
@@ -293,7 +298,7 @@ class PreferencesDialog(QDialog):
         self.Accept = QDialogButtonBox(self)
         self.Accept.setGeometry(QtCore.QRect(20, 230, 361, 32))
         self.Accept.setOrientation(QtCore.Qt.Horizontal)
-        self.Accept.setStandardButtons(QDialogButtonBox.Apply|QDialogButtonBox.Cancel|QDialogButtonBox.Save)
+        self.Accept.setStandardButtons(QDialogButtonBox.Cancel|QDialogButtonBox.Save)
         self.Accept.setObjectName("Accept")
         self.gridLayoutWidget = QWidget(self)
         self.gridLayoutWidget.setGeometry(QtCore.QRect(9, 9, 371, 221))
@@ -383,14 +388,14 @@ class PreferencesDialog(QDialog):
         # Retranslate UI
         self.setWindowTitle("Preferences")
         self.lockin_freq_label.setText("Lock-in frequency")
-        self.save_path_label.setText("Save path")
-        self.set_save_dir_button.setText("Set save directory")
+        self.save_path_label.setText("Default save path")
+        self.set_save_dir_button.setText("Select folder")
         self.stm_model_label.setText("STM model")
         self.lockin_ip_label.setText("Lock-in IP")
         self.sample_rate_label.setText("AWG sample rate")
         self.lockin_port_label.setText("Lock-in port")
         self.awg_id_label.setText("AWG ID")
-        self.file_save_name_label.setText("File save name")
+        self.file_save_name_label.setText("File name")
         
         # Set current values
         self.awg_id.setText(str(self.settings.value('awg_id')))
@@ -402,22 +407,20 @@ class PreferencesDialog(QDialog):
         self.file_save_name.setText(str(self.settings.value('file_save_name')))
         self.save_path.setText(str(self.settings.value('save_path')))
         
-        self.Accept.accepted.connect(self.accept)
+        self.Accept.accepted.connect(self.update_settings)
         self.Accept.rejected.connect(self.reject)
-        self.Accept.clicked.connect(self.apply)
+        self.set_save_dir_button.clicked.connect(self.select_folder)
         QtCore.QMetaObject.connectSlotsByName(self)
         
-    def accept(self):
+    def update_settings(self):
         for setting in self.new_settings:
             self.settings.setValue(setting.objectName(), setting.text())
-            
-        self.reject()
-        
-    def apply(self, btn):
-        role = self.Accept.buttonRole(btn)
-        if role == QDialogButtonBox.ApplyRole:
-            for setting in self.new_settings:
-                self.settings.setValue(setting.objectName(), setting.text())
+        self.accept()
+
+    def select_folder(self):
+        save_path = QFileDialog.getExistingDirectory(self, 'Select Save Folder', self.save_path.text())
+        self.save_path.setText(save_path)
+
 
 class MainWindow(QMainWindow):
     """
@@ -864,8 +867,8 @@ class MainWindow(QMainWindow):
         
         # Amp procedure settings
         self.amp_procedure_channel_label.setText("Channel:")
-        self.amp_procedure_channel.setItemText(0, "Probe")
-        self.amp_procedure_channel.setItemText(1, "Pump")
+        self.amp_procedure_channel.setItemText(0, "Pump")
+        self.amp_procedure_channel.setItemText(1, "Probe")
         self.amp_procedure_start_label.setText("Amplitude start:")
         self.amp_procedure_end_label.setText("Amplitude end:")
         self.amp_procedure_fixed_time_delay_label.setText("Fixed time delay:")
@@ -1066,16 +1069,24 @@ class MainWindow(QMainWindow):
         if match == 'Time delay':
             self.time_delay_procedure_settings_layout_outer.setHidden(False)
             self.sweep_channel.setEnabled(True)
+            self.probe_amp.setEnabled(True)
+            self.pump_amp.setEnabled(True)
         elif match == 'Amplitude':
             self.amp_procedure_settings_layout_outer.setHidden(False)
             if self.amp_procedure_channel.currentText() == "Probe":
                 self.sweep_channel.setCurrentText("Pump")
+                self.pump_amp.setEnabled(False)
+                self.probe_amp.setEnabled(True)
             else:
                 self.sweep_channel.setCurrentText("Probe")
+                self.probe_amp.setEnabled(True)
+                self.pump_amp.setEnabled(False)
             self.sweep_channel.setEnabled(False)
         elif match == 'Image':
             self.image_procedure_settings_layout_outer.setHidden(False)
             self.sweep_channel.setEnabled(True)
+            self.probe_amp.setEnabled(True)
+            self.pump_amp.setEnabled(True)
     
     def sweep_param_changed(self):
         """
@@ -1097,8 +1108,12 @@ class MainWindow(QMainWindow):
         """
         if self.amp_procedure_channel.currentText() == "Probe":
             self.sweep_channel.setCurrentText("Pump")
+            self.probe_amp.setEnabled(False)
+            self.pump_amp.setEnabled(True)
         else:
             self.sweep_channel.setCurrentText("Probe")
+            self.pump_amp.setEnabled(False)
+            self.probe_amp.setEnabled(True)
 
     def update_image_lines_per_second(self):
         self.image_lines_per_second.setValue(self.image_scan_speed.value() / self.image_size.value())
@@ -1174,11 +1189,12 @@ class MainWindow(QMainWindow):
                 'probe_amp': self.probe_amp.text(), 'probe_width': self.probe_width.text(), 'probe_edge': self.probe_edge.text(),
                 'domain': '', 'fixed_time_delay' : 'None'}
         
+        # Define table entries by procedure type
         match = exp_dict['procedure']
         if match == 'Time delay':
             bound = self.time_delay_time_spread.textFromValue(self.time_delay_time_spread.value()/2)
             exp_dict['domain'] = f'(-{bound}s, {bound}s)'
-        elif match == 'Amplitde':
+        elif match == 'Amplitude':
             exp_dict['domain'] = f'({self.amp_procedure_start.text()}, {self.amp_procedure_end.text()})'
             exp_dict['fixed_time_delay'] = self.amp_procedure_fixed_time_delay.text()
             if self.amp_procedure_channel.currentText() == "Pump":
@@ -1188,12 +1204,11 @@ class MainWindow(QMainWindow):
         elif match == 'Image':
             pass           
         
-        sweep_param = self.sweep_parameter.currentText()
-        sweep_ch = self.sweep_channel.currentText()
-    
-        domain_str = f'{{{self.sweep_start.text()}, {self.sweep_end.text()}}} : {self.sweep_step.text()}'
-        
+        # Change table entries if sweeping pulse parameters
         if self.sweep_box.isChecked():
+            sweep_param = self.sweep_parameter.currentText()
+            sweep_ch = self.sweep_channel.currentText()
+            domain_str = f'{{{self.sweep_start.text()}, {self.sweep_end.text()}}} : {self.sweep_step.text()}'
             if sweep_param == "Amplitude":
                 if sweep_ch == "Pump":
                     exp_dict['pump_amp'] = domain_str
@@ -1217,8 +1232,8 @@ class MainWindow(QMainWindow):
                     exp_dict['probe_edge'] = domain_str
                 else:
                     exp_dict['pump_edge'] = domain_str
-                    exp_dict['probe_edge'] = domain_str                    
-        
+                    exp_dict['probe_edge'] = domain_str
+
         return exp_dict
 
     def add_procedure(self):
@@ -1235,9 +1250,9 @@ class MainWindow(QMainWindow):
             step = self.sweep_step.value()
             sweep_range = np.arange(self.sweep_start.value(), self.sweep_end.value() + step, step)
             steps = len(sweep_range)
-        
-        sweep_param = self.sweep_parameter.currentText()
-        sweep_ch = self.sweep_channel.currentText()
+
+            sweep_param = self.sweep_parameter.currentText()
+            sweep_ch = self.sweep_channel.currentText()
         
         for i in range(steps):
             """TODO: Remove self.time_delay_time_spread dependence in Pulse creation"""
@@ -1272,9 +1287,12 @@ class MainWindow(QMainWindow):
             match = self.procedure.currentText()
             if match == 'Time delay':
                 samples = self.time_delay_sample_size.value()
-                domain = (-180, 180)
-                conversion_factor = self.time_delay_time_spread.value() / 360 * self.PumpProbe.config.sample_rate
+                domain = (180, -180)
+                conversion_factor = -self.time_delay_time_spread.value() / 360 * self.PumpProbe.config.sample_rate
             elif match == 'Amplitude':
+                pulse_length = 5 * (pump_pulse.width + probe_pulse.width)
+                pump_pulse.time_spread = pulse_length
+                probe_pulse.time_spread = pulse_length
                 samples = self.amp_procedure_sample_size.value()
                 domain = (self.amp_procedure_start.value(), self.amp_procedure_end.value())
                 conversion_factor = 1.0
@@ -1284,8 +1302,8 @@ class MainWindow(QMainWindow):
                     pump_pulse.amp = domain[0]
             elif match == 'Image':
                 samples = self.image_frames.value()
-                domain = (-180, 180)
-                conversion_factor = self.image_time_spread.value() / 360 * self.PumpProbe.config.sample_rate
+                domain = (180, -180)
+                conversion_factor = -self.image_time_spread.value() / 360 * self.PumpProbe.config.sample_rate
                 self.report_progress(["Image functionality not implemented yet.", logging.DEBUG])
                 return
                 
@@ -1334,12 +1352,13 @@ class MainWindow(QMainWindow):
         else:
             return None
             
+        log.debug(proc_channel)
         return PumpProbeProcedure(proc_type=proc_type, call=proc_call, channel=proc_channel, experiments=list())
     
     def set_save_path(self):
         """
         """
-        save_path = QFileDialog.getExistingDirectory(self, 'Set Save Path', self.PumpProbe.config.save_path)
+        save_path = QFileDialog.getExistingDirectory(self, 'Select Save Folder', self.PumpProbe.config.save_path)
         self.PumpProbe.config.save_path = save_path
         self.settings.setValue('save_path', save_path)
         self.report_progress([f"Save path set to {self.PumpProbe.config.save_path}", logging.INFO])
@@ -1351,9 +1370,10 @@ class MainWindow(QMainWindow):
         """        
         settings_dialog = PreferencesDialog(self.settings)
         if settings_dialog.exec_():
+            # Update PumpProbeConfig
             config = dict()
+            self.report_progress(["Settings updated:", logging.INFO])
             for key in self.settings.allKeys():
                 config[key] = self.settings.value(key, type=type(self.default_config[key]))
                 log.info(f"{key} : {self.settings.value(key)} - {type(self.default_config[key])}")
             self.PumpProbe.config = PumpProbeConfig(**config)
-            self.report_progress(["Settings updated.", logging.INFO])

@@ -56,7 +56,7 @@ class QPlotter(QtCore.QObject):
     """
     # Plotter signals are called inside pyppspec.pumpprobe
     _plot = QtCore.pyqtSignal(list)
-    _new_line = QtCore.pyqtSignal(str)
+    _new_line = QtCore.pyqtSignal()
     
     def __init__(self):
         super().__init__()
